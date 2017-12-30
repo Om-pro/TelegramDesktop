@@ -17,6 +17,7 @@ import org.javagram.dao.Person;
 import org.javagram.dao.proxy.TelegramProxy;
 import org.javagram.dao.proxy.changes.UpdateChanges;
 import overlays.ContactInfo;
+import overlays.PlusOverlay;
 import overlays.ProfileForm;
 
 import javax.swing.*;
@@ -28,6 +29,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Objects;
 
 /**
@@ -41,29 +43,25 @@ public class MyFrame extends JFrame {
     private ContactsList contactsList = new ContactsList();
 
     private MainForm mainForm = new MainForm();
-
     private ProfileForm profileForm = new ProfileForm();
-    private OverlayDialog overlayDialog = new OverlayDialog();
+    private PlusOverlay plusOverlay = new PlusOverlay();
+    private MyLayeredPane contactsLayeredPane = new MyLayeredPane();
 
-    private Decoration decoration;
+    private Decoration decoration = new Decoration(this);
 
     private TelegramDAO telegramDAO;
     private TelegramProxy telegramProxy;
 
-    private MyLayeredPane contactsLayeredPane = new MyLayeredPane();
+    OverlayDialog overlayDialog = new OverlayDialog();
 
+    private Timer timer;
     private int messagesFrozen;
-
 
     public MyFrame(TelegramDAO telegramDAO) {
 
         this.telegramDAO = telegramDAO;
 
-        decoration = new Decoration(this);
-
-
-        decoration.setContentPanel(overlayDialog);
-
+        setContentPanel(mobileNumberForm);
 
         showPhoneNumberRequest(false);
 
@@ -81,18 +79,116 @@ public class MyFrame extends JFrame {
         setMinimumSize(new Dimension(400, 500));
 
         mobileNumberForm.addActionListenerForSwitchAction((ActionEvent e) -> {
-            switchFromPhone();
+            String number = mobileNumberForm.getFormattedValue();
+            if (number == null) {
+                showPhoneNumberEmptyDialog();
+            } else {
+                try {
+                    try {
+                        telegramDAO.acceptNumber(number.replaceAll("[\\D]+", ""));
 
+                        if (telegramDAO.canSignIn()) {
+                            telegramDAO.sendCode();
+                            setContentPanel(checkCodeForm);
+                        } else {
+                            setContentPanel(regForm);
+                        }
+                        checkCodeForm.setPhoneLabelText(number);
+                    } catch (ApiException e1) {
+                        if (e1.isPhoneNumberInvalid()) {
+                            showPhoneNumberInvalid();
+                            return;
+                        }
+                        throw e1;
+                    }
+                } catch (Exception e1) {
+                    catchException(e1);
+                }
+            }
         });
 
         regForm.addActionListenerForSwitchAction(e -> {
 
-            switchFromRegistration();
+            String firstName = regForm.getNameField();
+            String lastName = regForm.getSurnameField();
+
+            if (firstName.isEmpty() && lastName.isEmpty()) {
+                Decoration.showDialog(MyFrame.this, "Введите имя и/или фамилию", JOptionPane.WARNING_MESSAGE, JOptionPane.DEFAULT_OPTION, null, null, null);
+            } else {
+                try {
+                    telegramDAO.sendCode();
+                    setContentPanel(checkCodeForm);
+                } catch (Exception e1) {
+                    catchException(e1);
+                }
+            }
         });
 
-        checkCodeForm.addActionListenerForSwitchAction(e -> {
+        checkCodeForm.addActionListenerForSwitchAction(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent e) {
 
-            switchFromCode();
+                String firstName = regForm.getNameField();
+                String lastName = regForm.getSurnameField();
+                char[] code = checkCodeForm.getPasswordField();
+
+                if (code.length == 0) {
+                    showCodeEmptyDialog();
+                } else {
+                    try {
+                        String codeToString = String.valueOf(code);
+                        Arrays.fill(code, '\0');
+                        try {
+
+                            if (telegramDAO.canSignIn()) {
+                                telegramDAO.signIn(codeToString);
+
+                            } else {
+                                telegramDAO.signUp(codeToString, firstName, lastName);
+                            }
+                            setContentPanel(overlayDialog);
+                            mainForm.setContactsPanel(contactsList);
+                            overlayDialog.setContentPanel(mainForm);
+                            createTelegramProxy();
+                            telegramProxy.getMe();
+                        } catch (ApiException e1) {
+                            if (e1.isCodeInvalid()) {
+                                showCodeInvalid();
+                                return;
+                            }
+                            if (e1.isCodeEmpty()) {
+                                showCodeEmpty();
+                                return;
+                            }
+                            if (e1.isCodeExpired()) {
+                                showCodeExpired();
+                                return;
+                            }
+                            if (e1.isNameInvalid()) {
+                                showNameInvalid();
+                                return;
+                            }
+                            throw e1;
+                        }
+                    } catch (Exception e1) {
+                        catchException(e1);
+                    }
+                }
+            }
+        });
+
+        mainForm.setContactsPanel(contactsLayeredPane);
+        contactsLayeredPane.add(contactsList, new Integer(0));
+        contactsLayeredPane.add(plusOverlay, new Integer(1));
+
+        mainForm.addGearEventListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                Me me = telegramProxy.getMe();
+                ContactInfo contactInfo = Helper.toContactInfo(me, telegramProxy, false, false);
+                profileForm.setContactInfo(contactInfo);
+                overlayDialog.setOverlayPanel(profileForm);
+            }
         });
 
         contactsList.addListSelectionListener(new ListSelectionListener() {
@@ -109,9 +205,6 @@ public class MyFrame extends JFrame {
                 }
             }
         });
-
-        mainForm.setContactsPanel(contactsLayeredPane);
-        contactsLayeredPane.add(contactsList, new Integer(0));
 
         mainForm.addSendMessageListener(new ActionListener() {
             @Override
@@ -130,20 +223,29 @@ public class MyFrame extends JFrame {
             }
         });
 
-        mainForm.addGearEventListener(new ActionListener() {
+        profileForm.addActionListenerForClose(new ActionListener() {
             @Override
-            public void actionPerformed(ActionEvent e) {
-                Me me = telegramProxy.getMe();
-                ContactInfo contactInfo = Helper.toContactInfo(me, telegramProxy, false, false);
-                profileForm.setContactInfo(contactInfo);
-                changeOverlayPanel(profileForm);
+            public void actionPerformed(ActionEvent actionEvent) {
+                overlayDialog.setOverlayPanel(null);
             }
         });
 
-        profileForm.addActionListenerForClose(actionEvent -> changeOverlayPanel(null));
+        profileForm.addActionListenerForLogout(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                switchToBegin();
+            }
+        });
 
-        profileForm.addActionListenerForLogout(e -> switchToBegin());
+        timer = new Timer(2000, new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                checkForUpdates(false);
+            }
+        });
+        timer.start();
     }
+
 
     protected void checkForUpdates(boolean force) {
         if (telegramProxy != null) {
@@ -183,106 +285,6 @@ public class MyFrame extends JFrame {
         }
     }
 
-    private void switchFromPhone() {
-        String phoneNumber = mobileNumberForm.getFormattedValue();
-        if (phoneNumber == null) {
-            showPhoneNumberEmpty();
-        } else {
-            switchFromPhone(phoneNumber);
-        }
-    }
-
-    private void switchFromPhone(String phoneNumber) {
-        try {
-            try {
-                telegramDAO.acceptNumber(phoneNumber.replaceAll("[\\D]+", ""));
-
-                if (telegramDAO.canSignUp()) {
-                    if (showQuestionMessage("Пользователь не зарегистрирован. Будет регистрироваться?", "Внимание!")) {
-                        showNameRequest(true);
-                    } else {
-                        showPhoneNumberRequest(true);
-                        return;
-                    }
-                } else {
-                    sendAndRequestCode();
-                }
-
-                checkCodeForm.setPhoneLabelText(phoneNumber);
-
-            } catch (ApiException e) {
-                if (e.isPhoneNumberInvalid()) {
-                    showPhoneNumberInvalid();
-                    return;
-                }
-                throw e;
-            }
-        } catch (Exception e) {
-            catchException(e);
-        }
-    }
-
-    private void switchFromRegistration() {
-        String firstName = regForm.getNameField();
-        String lastName = regForm.getSurnameField();
-        //Отсекаем только очевидный ляп.
-        //С остальным пусть сервер разбирается
-        if ((firstName == null || firstName.isEmpty())
-                && (lastName == null || lastName.isEmpty())) {
-            showNameInvalid();
-        } else {
-            try {
-                sendAndRequestCode();
-            } catch (Exception e) {
-                catchException(e);
-            }
-        }
-    }
-
-    private void switchFromCode() {
-        String firstName = regForm.getNameField();
-        String lastName = regForm.getSurnameField();
-        char[] code = checkCodeForm.getPasswordField();
-        String codeToString = String.valueOf(code);
-        if (codeToString.isEmpty()) {
-            showCodeEmpty();
-        } else {
-            switchFromCode(firstName, lastName, codeToString);
-        }
-    }
-
-    private void switchFromCode(String firstName, String lastName, String code) {
-        try {
-            try {
-                if (telegramDAO.canSignIn())
-                    telegramDAO.signIn(code);
-                else
-                    telegramDAO.signUp(code, firstName, lastName);
-                switchToMainScreen();
-            } catch (ApiException e) {
-                if (e.isCodeInvalid()) {
-                    showCodeInvalid();
-                    return;
-                }
-                if (e.isCodeEmpty()) {
-                    showCodeEmpty();
-                    return;
-                }
-                if (e.isCodeExpired()) {
-                    showCodeExpired();
-                    return;
-                }
-                if (e.isNameInvalid()) {
-                    showNameInvalid();
-                    return;
-                }
-                throw e;
-            }
-        } catch (Exception e) {
-            catchException(e);
-        }
-    }
-
     private JButton[] okButton = BlueButton.createDecoratedButtons(JOptionPane.DEFAULT_OPTION);
     private JButton[] yesNoButtons = BlueButton.createDecoratedButtons(JOptionPane.YES_NO_OPTION);
 
@@ -314,14 +316,13 @@ public class MyFrame extends JFrame {
         showPhoneNumberRequest(true);
     }
 
-    private void showPhoneNumberEmpty() {
-        showWarningMessage("Введите корректный номер телефона!", "Внимание!");
-        showPhoneNumberRequest(true);
-    }
-
     private void showNameInvalid() {
         showWarningMessage("Неверные регистрационные данные", "Внимание!");
         showNameRequest(false);
+    }
+
+    private void setContentPanel(Container container) {
+        decoration.setContentPanel(container);
     }
 
     private void sendCode() throws IOException, ApiException {
@@ -343,7 +344,6 @@ public class MyFrame extends JFrame {
 
     private void sendAndRequestCode() throws IOException, ApiException {
         sendCode();
-        showCodeRequest();
     }
 
     private void catchException(Exception e) {
@@ -358,14 +358,14 @@ public class MyFrame extends JFrame {
     }
 
     private void showPhoneNumberRequest(boolean clear) {
-        changeContentPanel(mobileNumberForm);
+        setContentPanel(mobileNumberForm);
         if (clear)
             mobileNumberForm.clear();
         mobileNumberForm.transferFocusTo();
     }
 
     private void showNameRequest(boolean clear) {
-        changeContentPanel(regForm);
+        setContentPanel(regForm);
         if (clear)
             regForm.clear();
     }
@@ -465,15 +465,6 @@ public class MyFrame extends JFrame {
         }
     }
 
-    private void changeOverlayPanel(Container overlayPanel) {
-        overlayDialog.setOverlayPanel(overlayPanel);
-    }
-
-    private void switchToMainScreen() throws ApiException {
-        changeContentPanel(mainForm);
-        createTelegramProxy();
-    }
-
     private void abort(Throwable e) {
         if (e != null)
             e.printStackTrace();
@@ -487,14 +478,10 @@ public class MyFrame extends JFrame {
         System.exit(-1);
     }
 
-    private void changeContentPanel(Container contentPanel) {
-        overlayDialog.setContentPanel(contentPanel);
-    }
-
     private void switchToBegin() {
         try {
             destroyTelegramProxy();
-            changeOverlayPanel(null);
+            overlayDialog.setOverlayPanel(null);
             showPhoneNumberRequest(true);
             telegramDAO.logOut();
         } catch (Exception e) {
@@ -511,9 +498,4 @@ public class MyFrame extends JFrame {
         }
     }
 
-    private void showCodeRequest() {
-        changeContentPanel(checkCodeForm);
-        checkCodeForm.clear();
-        checkCodeForm.transferFocusTo();
-    }
 }
