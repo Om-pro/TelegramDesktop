@@ -48,6 +48,6 @@ public class MessageForm extends JPanel {
         super.paintComponent(graphics);
         graphics.setColor(color);
         graphics.fillRoundRect(textPane.getX(), textPane.getY(), textPane.getWidth(), textPane.getHeight(), RADIUS, RADIUS);
-//        graphics.drawImage(Images.getMessageInBottom(), 0, textPane.getHeight() - 7, null);
+//        graphics.drawImage(Images.getMessageInBottom(), 0, textPane.getHeight() - 7, textPane.getWidth(), 7,  null);
     }
 }

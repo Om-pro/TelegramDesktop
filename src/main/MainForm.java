@@ -116,6 +116,18 @@ public class MainForm extends JPanel {
         this.settingsButton.addActionListener(listener);
     }
 
+    public void addBuddyEditEventListener(ActionListener listener) {
+        this.editButton.addActionListener(listener);
+    }
+
+    public void addSearchEventListener(ActionListener listener) {
+        this.searchTextField.addActionListener(listener);
+    }
+
+    public String getSearchText() {
+        return this.searchTextField.getText();
+    }
+
     private void createUIComponents() {
         // TODO: place custom component creation code here
         rootPanel = this;
@@ -167,8 +179,8 @@ public class MainForm extends JPanel {
                 if (buddyText != null) {
 
                     int inset = 10;
-                    Font font = Fonts.getNameFont().deriveFont(Font.ITALIC, 18);
-                    Color color = Color.cyan;
+                    Font font = Fonts.getNameFont().deriveFont(Font.PLAIN, 18);
+                    Color color = Color.black;
                     String text = buddyText;
 
                     rightMostPoint = GuiHelper.drawText(graphics, text, color, font, rightMostPoint, 0, leftMostPoint - rightMostPoint, this.getHeight(), inset, false);

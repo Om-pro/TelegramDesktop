@@ -2,10 +2,7 @@ package frame;
 
 import contacts.ContactsList;
 import decoration.Decoration;
-import helpers.BlueButton;
-import helpers.Helper;
-import helpers.MyLayeredPane;
-import helpers.OverlayDialog;
+import helpers.*;
 import intro.CheckCodeForm;
 import intro.MobileNumberForm;
 import intro.RegForm;
@@ -16,9 +13,7 @@ import org.javagram.dao.Dialog;
 import org.javagram.dao.Person;
 import org.javagram.dao.proxy.TelegramProxy;
 import org.javagram.dao.proxy.changes.UpdateChanges;
-import overlays.ContactInfo;
-import overlays.PlusOverlay;
-import overlays.ProfileForm;
+import overlays.*;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
@@ -46,6 +41,8 @@ public class MyFrame extends JFrame {
     private ProfileForm profileForm = new ProfileForm();
     private PlusOverlay plusOverlay = new PlusOverlay();
     private MyLayeredPane contactsLayeredPane = new MyLayeredPane();
+    private AddContactForm addContactForm = new AddContactForm();
+    private EditContactForm editContactForm = new EditContactForm();
 
     private Decoration decoration = new Decoration(this);
 
@@ -60,6 +57,8 @@ public class MyFrame extends JFrame {
     public MyFrame(TelegramDAO telegramDAO) {
 
         this.telegramDAO = telegramDAO;
+
+        setTitle("Nachat");
 
         setContentPanel(mobileNumberForm);
 
@@ -88,10 +87,9 @@ public class MyFrame extends JFrame {
                         telegramDAO.acceptNumber(number.replaceAll("[\\D]+", ""));
 
                         if (telegramDAO.canSignIn()) {
-                            telegramDAO.sendCode();
-                            setContentPanel(checkCodeForm);
+                            sendAndRequestCode();
                         } else {
-                            setContentPanel(regForm);
+                            showNameRequest(true);
                         }
                         checkCodeForm.setPhoneLabelText(number);
                     } catch (ApiException e1) {
@@ -116,8 +114,7 @@ public class MyFrame extends JFrame {
                 Decoration.showDialog(MyFrame.this, "Введите имя и/или фамилию", JOptionPane.WARNING_MESSAGE, JOptionPane.DEFAULT_OPTION, null, null, null);
             } else {
                 try {
-                    telegramDAO.sendCode();
-                    setContentPanel(checkCodeForm);
+                    sendAndRequestCode();
                 } catch (Exception e1) {
                     catchException(e1);
                 }
@@ -147,7 +144,7 @@ public class MyFrame extends JFrame {
                                 telegramDAO.signUp(codeToString, firstName, lastName);
                             }
                             setContentPanel(overlayDialog);
-                            mainForm.setContactsPanel(contactsList);
+                            mainForm.setContactsPanel(contactsLayeredPane);
                             overlayDialog.setContentPanel(mainForm);
                             createTelegramProxy();
                             telegramProxy.getMe();
@@ -177,9 +174,15 @@ public class MyFrame extends JFrame {
             }
         });
 
-        mainForm.setContactsPanel(contactsLayeredPane);
         contactsLayeredPane.add(contactsList, new Integer(0));
         contactsLayeredPane.add(plusOverlay, new Integer(1));
+
+        mainForm.addSearchEventListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                searchFor(mainForm.getSearchText());
+            }
+        });
 
         mainForm.addGearEventListener(new ActionListener() {
             @Override
@@ -187,7 +190,33 @@ public class MyFrame extends JFrame {
                 Me me = telegramProxy.getMe();
                 ContactInfo contactInfo = Helper.toContactInfo(me, telegramProxy, false, false);
                 profileForm.setContactInfo(contactInfo);
-                overlayDialog.setOverlayPanel(profileForm);
+                changeOverlayPanel(profileForm);
+            }
+        });
+
+        plusOverlay.addActionListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                ContactInfo contactInfo = new ContactInfo();
+                Person person = contactsList.getSelectedValue();
+                if (person instanceof KnownPerson && !(person instanceof Contact))
+                    contactInfo.setPhone(((KnownPerson) person).getPhoneNumber());
+                addContactForm.setContactInfo(contactInfo);
+                changeOverlayPanel(addContactForm);
+            }
+        });
+
+        addContactForm.addActionListenerForClose(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                changeOverlayPanel(null);
+            }
+        });
+
+        addContactForm.addActionListenerForAdd(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                tryAddContact(addContactForm.getContactInfo());
             }
         });
 
@@ -226,7 +255,7 @@ public class MyFrame extends JFrame {
         profileForm.addActionListenerForClose(new ActionListener() {
             @Override
             public void actionPerformed(ActionEvent actionEvent) {
-                overlayDialog.setOverlayPanel(null);
+                changeOverlayPanel(null);
             }
         });
 
@@ -234,6 +263,38 @@ public class MyFrame extends JFrame {
             @Override
             public void actionPerformed(ActionEvent actionEvent) {
                 switchToBegin();
+            }
+        });
+
+        mainForm.addBuddyEditEventListener(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                Person person = contactsList.getSelectedValue();
+                if (person instanceof Contact) {
+                    editContactForm.setContactInfo(Helper.toContactInfo((Contact) person, telegramProxy, false, true));
+                    changeOverlayPanel(editContactForm);
+                }
+            }
+        });
+
+        editContactForm.addActionListenerForClose(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                changeOverlayPanel(null);
+            }
+        });
+
+        editContactForm.addActionListenerForSave(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                tryUpdateContact(editContactForm.getContactInfo());
+            }
+        });
+
+        editContactForm.addActionListenerForRemove(new ActionListener() {
+            @Override
+            public void actionPerformed(ActionEvent actionEvent) {
+                tryDeleteContact(editContactForm.getContactInfo());
             }
         });
 
@@ -342,8 +403,14 @@ public class MyFrame extends JFrame {
         sendAndRequestCode();
     }
 
+    private void showInformationMessage(String text, String title) {
+        Decoration.showDialog(this, text, title, JOptionPane.INFORMATION_MESSAGE, JOptionPane.DEFAULT_OPTION, null,
+                okButton, okButton[0]);
+    }
+
     private void sendAndRequestCode() throws IOException, ApiException {
         sendCode();
+        showCodeRequest();
     }
 
     private void catchException(Exception e) {
@@ -368,6 +435,12 @@ public class MyFrame extends JFrame {
         setContentPanel(regForm);
         if (clear)
             regForm.clear();
+    }
+
+    private void showCodeRequest() {
+        setContentPanel(checkCodeForm);
+        checkCodeForm.clear();
+        checkCodeForm.transferFocusTo();
     }
 
     private void displayDialog(Person person) {
@@ -405,6 +478,9 @@ public class MyFrame extends JFrame {
         }
     }
 
+    private void changeOverlayPanel(Container overlayPanel) {
+        overlayDialog.setOverlayPanel(overlayPanel);
+    }
 
     private void createTelegramProxy() throws ApiException {
         telegramProxy = new TelegramProxy(telegramDAO);
@@ -463,6 +539,109 @@ public class MyFrame extends JFrame {
         } else {
             return createMessagesForm();
         }
+    }
+
+    private void searchFor(String text) {
+        text = text.trim();
+        if (text.isEmpty()) {
+            return;
+        }
+        String[] words = text.toLowerCase().split("\\s+");
+        java.util.List<Person> persons = telegramProxy.getPersons();
+        Person person = contactsList.getSelectedValue();
+        person = searchFor(text.toLowerCase(), words, persons, person);
+        contactsList.setSelectedValue(person);
+        if (person == null)
+            showInformationMessage("Ничего не найдено", "Поиск");
+    }
+
+    private static Person searchFor(String text, String[] words, java.util.List<? extends Person> persons, Person current) {
+        int currentIndex = persons.indexOf(current);
+
+        for (int i = 1; i <= persons.size(); i++) {
+            int index = (currentIndex + i) % persons.size();
+            Person person = persons.get(index);
+            if (contains(person.getFirstName().toLowerCase(), words)
+                    || contains(person.getLastName().toLowerCase(), words)) {
+                return person;
+            }
+        }
+        return null;
+    }
+
+    private static boolean contains(String text, String... words) {
+        for (String word : words) {
+            if (text.contains(word))
+                return true;
+        }
+        return false;
+    }
+
+    private boolean tryAddContact(ContactInfo info) {
+
+        String phone = info.getClearedPhone();
+        if (phone.isEmpty()) {
+            showWarningMessage("Пожалуйста, введите номер телефона", "Ошибка");
+            return false;
+        }
+        if (info.getFirstName().isEmpty() && info.getLastName().isEmpty()) {
+            showWarningMessage("Пожалуйста, введите имя и/или фамилию", "Ошибка");
+            return false;
+        }
+        for (Person person : telegramProxy.getPersons()) {
+            if (person instanceof Contact) {
+                if (((Contact) person).getPhoneNumber().replaceAll("\\D+", "").equals(phone)) {
+                    showWarningMessage("Контакт с таким номером уже существует", "Ошибка");
+                    return false;
+                }
+            }
+        }
+        try {
+            telegramProxy.importContact(info.getPhone(), info.getFirstName(), info.getLastName());
+        } catch (Exception e) {
+            showWarningMessage("Ошибка на сервере при добавлении контакта", "Ошибка");
+            return false;
+        }
+
+        changeOverlayPanel(null);
+        checkForUpdates(true);
+        return true;
+    }
+
+    private boolean tryUpdateContact(ContactInfo info) {
+
+        String phone = info.getClearedPhone();
+
+        if (info.getFirstName().isEmpty() && info.getLastName().isEmpty()) {
+            showWarningMessage("Пожалуйста, введите имя и/или фамилию", "Ошибка");
+            return false;
+        }
+
+        try {
+            telegramProxy.importContact(info.getPhone(), info.getFirstName(), info.getLastName());
+        } catch (Exception e) {
+            showWarningMessage("Ошибка на сервере при изменении контакта", "Ошибка");
+            return false;
+        }
+
+        changeOverlayPanel(null);
+        checkForUpdates(true);
+        return true;
+    }
+
+    private boolean tryDeleteContact(ContactInfo info) {
+        int id = info.getId();
+
+        try {
+            telegramProxy.deleteContact(id);
+        } catch (Exception e) {
+            showWarningMessage("Ошибка на сервере при удалении контакта", "Ошибка");
+            return false;
+        }
+
+        changeOverlayPanel(null);
+        checkForUpdates(true);
+        return true;
     }
 
     private void abort(Throwable e) {

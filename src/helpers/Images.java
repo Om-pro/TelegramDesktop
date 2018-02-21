@@ -23,6 +23,11 @@ public class Images {
     private static BufferedImage penLogo;
     private static BufferedImage closeOverlay;
     private static BufferedImage logoutIcon;
+    private static BufferedImage plusIcon;
+    private static BufferedImage addContact;
+    private static BufferedImage removeContact;
+    private static BufferedImage updateContact;
+    private static BufferedImage messageInBottom;
 
     public synchronized static BufferedImage getBackground() {
         if (background == null)
@@ -126,6 +131,36 @@ public class Images {
         if(logoutIcon == null)
             logoutIcon = getImage("logout-icon.png");
         return logoutIcon;
+    }
+
+    public static BufferedImage getPlus() {
+        if(plusIcon == null)
+            plusIcon = getImage("icon-plus.png");
+        return plusIcon;
+    }
+
+    public static BufferedImage getAddContact() {
+        if(addContact == null)
+            addContact = getImage("Add-Male-User.png");
+        return addContact;
+    }
+
+    public static BufferedImage getUpdateContact() {
+        if(updateContact == null)
+            updateContact = getImage("43781db5c40ecc39fd718685594f0956.png");
+        return updateContact;
+    }
+
+    public static BufferedImage getRemoveContact() {
+        if(removeContact == null)
+            removeContact = getImage("Remove-Male-User.png");
+        return removeContact;
+    }
+
+    public static BufferedImage getMessageInBottom() {
+        if(messageInBottom == null)
+            messageInBottom = getImage("message-in-bottom.png");
+        return messageInBottom;
     }
 
     private static BufferedImage getImage(String name) {
